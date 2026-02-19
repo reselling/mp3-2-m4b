@@ -1,3 +1,5 @@
+## Convert audiobooks from mp3 to m4b w/ metadata and artwork
+
 How to use script:
 
 ```python3 convert.py <audiobook_dir> [output_dir]```
