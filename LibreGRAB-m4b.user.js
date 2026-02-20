@@ -1003,6 +1003,7 @@
     async function downloadEPUB(){
         let imageAssets = new Array();
         const files = [];
+
         // Add mimetype file (must be first and uncompressed for EPUB spec)
         files.push({
             name: "mimetype",
@@ -1019,7 +1020,6 @@
                 </container>
         `
         });
-
         // Add required encryption file for DRM compliance (required by EPUB spec)
         files.push({
             name: "META-INF/encryption.xml",
@@ -1027,46 +1027,106 @@
                 <encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"/>
         `
         });
+
         await createContent(files, imageAssets);
         makePackage(files, imageAssets);
         makeToc(files);
-        downloadElem.innerHTML += "<br><b>Downloads complete!</b> Starting EPUB generation and download...<br>";
+
+        // ── Bundle metadata.json + cover art ──────────────────────────────
+        const bookMeta = getBookMetadata();
+        files.push({
+            name: "metadata/metadata.json",
+            input: JSON.stringify(bookMeta, null, 2)
+        });
+        if (bookMeta.coverUrl) {
+            try {
+                const coverResp = await fetch(bookMeta.coverUrl);
+                const coverBlob = await coverResp.blob();
+                const coverExt  = bookMeta.coverUrl.split(".").pop().split("?")[0] || "jpg";
+                files.push({ name: `metadata/cover.${coverExt}`, input: coverBlob });
+                downloadElem.innerHTML += "Cover art bundled.<br>";
+            } catch(e) {
+                downloadElem.innerHTML += `<b>Warning:</b> Could not fetch cover art.<br>`;
+            }
+        }
+
+        // ── Build Libation-style path:  Author/Title - Year/Title.epub ────
+        const author    = safeName(bookMeta.author);
+        const title     = safeName(bookMeta.title);
+        const year      = bookMeta.year;
+        const epubName  = `${title}.epub`;
+        // suggestedName can't include subdirs in the picker, but we show the
+        // intended path in the log so the user knows where to save it.
+        const libationPath = `/Users/mariobarraza/eBooks/${author}/${title} - ${year}/${epubName}`;
+
+        downloadElem.innerHTML += `<br><b>Downloads complete!</b> Starting EPUB generation…<br>`;
+        downloadElem.innerHTML += `<span style="color:var(--lg-muted);font-size:12px">Save to: <code>${libationPath}</code></span><br>`;
         downloadElem.scrollTo(0, downloadElem.scrollHeight);
-        const filename = BIF.map.title.main + '.epub';
+
         // Try using File System Access API for streaming (much faster)
         if ('showSaveFilePicker' in window) {
             try {
                 const handle = await window.showSaveFilePicker({
-                    suggestedName: filename,
+                    suggestedName: epubName,
+                    startIn: "documents",
                     types: [{
                         description: 'EPUB eBook',
                         accept: {'application/epub+zip': ['.epub']},
                     }],
                 });
-                downloadElem.innerHTML += "Streaming EPUB file to disk...<br>";
+                downloadElem.innerHTML += "Streaming EPUB to disk…<br>";
                 downloadElem.scrollTo(0, downloadElem.scrollHeight);
                 const writable = await handle.createWritable();
                 const zipStream = downloadZip(files).body;
                 await zipStream.pipeTo(writable);
-                downloadElem.innerHTML += "Download complete!<br>";
+                downloadElem.innerHTML += `<b style="color:#4caf50">✅ Done!</b> EPUB saved.<br>`;
                 downloadElem.scrollTo(0, downloadElem.scrollHeight);
             } catch (err) {
                 if (err.name === 'AbortError') {
-                    // User cancelled the save dialog
-                    downloadElem.innerHTML += "Download cancelled by user.<br>";
+                    downloadElem.innerHTML += "Download cancelled.<br>";
                 } else {
                     console.error('Streaming download failed:', err);
-                    downloadElem.innerHTML += "Streaming failed, using fallback...<br>";
-                    // Fall back to blob method
-                    await fallbackBlobDownload(files, filename);
+                    downloadElem.innerHTML += "Streaming failed, using fallback…<br>";
+                    await fallbackBlobDownload(files, epubName);
                 }
             }
         } else {
-            // Fall back to blob method for older browsers
-            await fallbackBlobDownload(files, filename);
+            await fallbackBlobDownload(files, epubName);
         }
         downloadState = -1;
     }
+    // -----------------------------------------------------------------------
+    // Book metadata helpers
+    // -----------------------------------------------------------------------
+    function getBookAuthorString(){
+        return (BIF.map.creator || [])
+            .filter(c => c.role === 'author')
+            .map(c => c.name)
+            .join(", ") || "Unknown Author";
+    }
+    function getBookYear(){
+        const raw = BIF.map.publishDate || BIF.map.date || "";
+        return raw.toString().slice(0, 4) || "0000";
+    }
+    function safeName(str){
+        // Strip characters that are illegal in macOS/Windows filenames
+        return str.replace(/[\\/:*?"<>|]/g, "_").trim();
+    }
+    function getBookMetadata(){
+        return {
+            title:       BIF.map.title.main,
+            author:      getBookAuthorString(),
+            year:        getBookYear(),
+            description: BIF.map.description,
+            language:    (BIF.map.language || [])[0] || "",
+            identifier:  "" + BIF.map["-odread-buid"],
+            coverUrl:    (BIF.root.querySelector("image") || {}).getAttribute
+                            ? BIF.root.querySelector("image").getAttribute("href")
+                            : null,
+            creator:     BIF.map.creator,
+        };
+    }
+
 // Main entry point for audiobooks
 function bifFoundBook(){
     // New global style info

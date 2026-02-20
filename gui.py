@@ -243,8 +243,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Access-Control-Request-Private-Network")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        # Required for Chrome's Private Network Access policy (v98+):
+        # allows pages on public origins (libbyapp.com) to fetch localhost
+        self.send_header("Access-Control-Allow-Private-Network", "true")
 
     def log_message(self, *_):
         pass   # suppress server console spam
